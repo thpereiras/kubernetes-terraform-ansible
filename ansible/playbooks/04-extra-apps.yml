@@ -1,0 +1,52 @@
+- hosts: kube-cluster
+  become: yes
+
+  tasks:
+    - name: Install basic apps
+      package:
+        name:
+          - jq
+        state: present
+        update_cache: yes
+
+    - name: Install bat (a cat clone with wings)
+      apt:
+        deb: 'https://github.com/sharkdp/bat/releases/download/v0.18.3/bat-musl_0.18.3_amd64.deb'
+
+- hosts: kube-masters
+  become: yes
+  gather_facts: false
+
+  tasks:
+
+    - name: Download and unarchive k9s
+      unarchive:
+        src: https://github.com/derailed/k9s/releases/download/v0.24.15/k9s_Linux_x86_64.tar.gz
+        dest: /usr/bin
+        remote_src: yes
+
+    - name: Download and unarchive helm
+      unarchive:
+        src: https://get.helm.sh/helm-v3.6.0-linux-amd64.tar.gz
+        dest: /tmp/
+        remote_src: yes
+
+    - name: Copy helm to /usr/local/bin
+      copy:
+        src: /tmp/linux-amd64/helm
+        dest: /usr/local/bin
+        mode: a+x
+        remote_src: yes
+
+    - name: Add helm repositories from various vendors
+      shell: /usr/local/bin/helm repo add ealenn https://ealenn.github.io/charts; helm repo update
+
+    - name: Install metrics server on cluster
+      shell: kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/download/v0.6.1/components.yaml
+
+    - name: Allow insecure TLS on metrics server
+      shell: "kubectl -n kube-system patch deployment metrics-server --type='json' -p='[{'op': 'add', 'path': '/spec/template/spec/containers/0/args/1', 'value': '--kubelet-insecure-tls'}]'"
+
+    - name: Install Kubernetes Dashboard
+      shell: kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.5.0/aio/deploy/recommended.yaml
+

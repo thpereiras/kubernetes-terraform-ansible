@@ -1,0 +1,91 @@
+
+- hosts: kube-cluster
+  become: yes
+  gather_facts: no
+  tasks:
+
+    - name: Open port 179 for Calico networking (BGP)
+      ufw:
+        rule: allow
+        port: '179'
+        proto: tcp
+
+- hosts: kube-masters
+  become: yes
+  vars:
+    kubernetes_version: "v1.22.11"
+    calico_ipv4pool_cidr: "10.20.0.0/16"
+    default_user: "{{ 'admin' if ansible_facts['distribution'] == 'Debian' else 'ubuntu' }}"
+
+  tasks:
+
+    - name: Initialize the cluster (kubeadm init)
+      become_user: root
+      shell: kubeadm init --kubernetes-version={{ kubernetes_version }} --pod-network-cidr={{ calico_ipv4pool_cidr }} --ignore-preflight-errors=NumCPU,Mem
+             --upload-certs --apiserver-advertise-address={{ ansible_default_ipv4.address }} |
+             tee /tmp/kubeadm-init.out
+
+    - name: Create .kube directory
+      become_user: "{{ item }}"
+      file:
+        path: $HOME/.kube
+        state: directory
+        mode: 0755
+      with_items:
+        - "{{ default_user }}"
+        - "root"
+
+    - name: Copy admin.conf to user's kube config
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /home/{{ default_user }}/.kube/config
+        remote_src: yes
+        group: "{{ default_user }}"
+        owner: "{{ default_user }}"
+
+    - name: Copy admin.conf to root's kube config
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /root/.kube/config
+        remote_src: yes
+        owner: root
+
+#### Calico v3.20.0- ####
+
+    - name: Install Calico with Kubernetes API datastore, 50 nodes or less, for Container Network Interface (CNI)
+      become: yes
+      shell: kubectl apply -f https://docs.projectcalico.org/v3.23/manifests/calico.yaml
+
+    - name: Install calicoctl as a binary on a single host
+      become: yes
+      shell: curl -o /usr/bin/calicoctl -LO https://github.com/projectcalico/calicoctl/releases/download/v3.23.0/calicoctl
+
+    - name: Set the calicoctl file to be executable
+      become: yes
+      shell: chmod +x /usr/bin/calicoctl
+
+#### end Calico v3.20 ####
+
+#### Calico v3.19 ####
+
+    # - name: Install Calico for Container Network Interface (CNI)
+    #   become: yes
+    #   shell: kubectl apply -f https://docs.projectcalico.org/v3.19/manifests/calico.yaml
+
+#### end Calico v3.19 ####
+
+#### Calico v3.12 ####
+
+    # - name: Download Calico for Container Network Interface (CNI) manifest
+    #   become: yes
+    #   shell: curl -o /tmp/calico.yaml -LO https://docs.projectcalico.org/v3.12/manifests/calico.yaml
+
+    # - name: Change calico.yaml cidr
+    #   become: yes
+    #   shell: POD_CIDR="{{ calico_ipv4pool_cidr }}" sed -i -e "s?192.168.0.0/16?$POD_CIDR?g" /tmp/calico.yaml
+
+    # - name: Install Calico for Container Network Interface (CNI)
+    #   become: yes
+    #   shell: kubectl apply -f /tmp/calico.yaml
+
+#### end Calico v3.12 ####

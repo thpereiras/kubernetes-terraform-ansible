@@ -1,0 +1,50 @@
+- hosts: kube-cluster
+  become: yes
+  tasks:
+
+  - name: Update the inventory into /etc/hosts
+    lineinfile:
+      dest: /etc/hosts
+      regexp: '.*{{ item }}$'
+      line: "{{ hostvars[item]['ansible_default_ipv4']['address'] }} {{item}}"
+      state: present
+    when: hostvars[item]['ansible_facts']['default_ipv4'] is defined
+    with_items:
+      - "{{ groups['all'] }}"
+
+- hosts: kube-masters
+  become: yes
+  gather_facts: false
+
+  tasks:
+    - name: Get join command
+      shell: kubeadm token create --print-join-command
+      register: join_command_raw
+
+    - name: Set join command
+      set_fact:
+        join_command: "{{ join_command_raw.stdout_lines[0] }}"
+
+    - name: Add command to tmp host
+      add_host:
+        name:   "tmp_host"
+        join_command:  "{{ join_command_raw.stdout_lines[0] }}"
+
+    - name: Get node names
+      shell: kubectl get nodes -o=custom-columns=NAME:.metadata.name --no-headers
+      register: node_names
+
+    - name: Add node names to tmp host
+      add_host:
+        name:   "tmp_node_names"
+        node_names:  "{{ node_names.stdout_lines }}"
+
+- hosts: kube-nodes
+  become: yes
+  tasks:
+    - name: Join nodes
+      shell: "{{ hostvars['tmp_host']['join_command'] }} >> node_joined.txt"
+      args:
+        chdir: $HOME
+        creates: node_joined.txt
+      when: inventory_hostname not in hostvars['tmp_node_names']['node_names']
